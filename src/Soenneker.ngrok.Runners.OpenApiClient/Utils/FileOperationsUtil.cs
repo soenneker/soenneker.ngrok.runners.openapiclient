@@ -16,6 +16,7 @@ using Soenneker.Utils.Directory.Abstract;
 using Soenneker.Utils.File.Abstract;
 using Soenneker.Utils.File.Download.Abstract;
 using System.Collections.Generic;
+using Soenneker.Kiota.Util.Abstract;
 
 namespace Soenneker.ngrok.Runners.OpenApiClient.Utils;
 
@@ -30,9 +31,10 @@ public sealed class FileOperationsUtil : IFileOperationsUtil
     private readonly IFileDownloadUtil _fileDownloadUtil;
     private readonly IFileUtil _fileUtil;
     private readonly IDirectoryUtil _directoryUtil;
+    private readonly IKiotaUtil _kiotaUtil;
 
     public FileOperationsUtil(ILogger<FileOperationsUtil> logger, IConfiguration configuration, IGitUtil gitUtil, IDotnetUtil dotnetUtil, IProcessUtil processUtil, 
-        IFileDownloadUtil fileDownloadUtil, IFileUtil fileUtil, IDirectoryUtil directoryUtil)
+        IFileDownloadUtil fileDownloadUtil, IFileUtil fileUtil, IDirectoryUtil directoryUtil, IKiotaUtil kiotaUtil)
     {
         _logger = logger;
         _configuration = configuration;
@@ -42,6 +44,7 @@ public sealed class FileOperationsUtil : IFileOperationsUtil
         _fileDownloadUtil = fileDownloadUtil;
         _fileUtil = fileUtil;
         _directoryUtil = directoryUtil;
+        _kiotaUtil = kiotaUtil;
     }
 
     public async ValueTask Process(CancellationToken cancellationToken = default)
@@ -57,21 +60,20 @@ public sealed class FileOperationsUtil : IFileOperationsUtil
         string? filePath = await _fileDownloadUtil.Download(openApiDocumentUrl,
             targetFilePath, fileExtension: ".yaml", cancellationToken: cancellationToken);
 
-        await _processUtil.Start("dotnet", null, "tool update --global Microsoft.OpenApi.Kiota", waitForExit: true, cancellationToken: cancellationToken);
+        await _kiotaUtil.EnsureInstalled(cancellationToken);
 
         string srcDirectory = Path.Combine(gitDirectory, "src", Constants.Library);
 
         await DeleteAllExceptCsproj(srcDirectory, cancellationToken);
 
-        await _processUtil.Start("kiota", gitDirectory, $"kiota generate -l CSharp -d \"{filePath}\" -o src/{Constants.Library} -c ngrokOpenApiClient -n {Constants.Library}",
-            waitForExit: true, cancellationToken: cancellationToken).NoSync();
+        await _kiotaUtil.Generate(filePath, "ngrokOpenApiClient", Constants.Library, srcDirectory, cancellationToken);
 
         await BuildAndPush(gitDirectory, cancellationToken).NoSync();
     }
 
     public async ValueTask DeleteAllExceptCsproj(string directoryPath, CancellationToken cancellationToken = default)
     {
-        if (!(await _directoryUtil.Exists(directoryPath, cancellationToken)))
+        if (!await _directoryUtil.Exists(directoryPath, cancellationToken))
         {
             _logger.LogWarning("Directory does not exist: {DirectoryPath}", directoryPath);
             return;
