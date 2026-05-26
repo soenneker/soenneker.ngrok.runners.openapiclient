@@ -17,6 +17,7 @@ using Soenneker.Utils.File.Abstract;
 using Soenneker.Utils.File.Download.Abstract;
 using System.Collections.Generic;
 using Soenneker.Kiota.Util.Abstract;
+using Soenneker.OpenApi.Fixer.Abstract;
 
 namespace Soenneker.ngrok.Runners.OpenApiClient.Utils;
 
@@ -32,9 +33,10 @@ public sealed class FileOperationsUtil : IFileOperationsUtil
     private readonly IFileUtil _fileUtil;
     private readonly IDirectoryUtil _directoryUtil;
     private readonly IKiotaUtil _kiotaUtil;
+    private readonly IOpenApiFixer _openApiFixer;
 
     public FileOperationsUtil(ILogger<FileOperationsUtil> logger, IConfiguration configuration, IGitUtil gitUtil, IDotnetUtil dotnetUtil, IProcessUtil processUtil, 
-        IFileDownloadUtil fileDownloadUtil, IFileUtil fileUtil, IDirectoryUtil directoryUtil, IKiotaUtil kiotaUtil)
+        IFileDownloadUtil fileDownloadUtil, IFileUtil fileUtil, IDirectoryUtil directoryUtil, IKiotaUtil kiotaUtil, IOpenApiFixer openApiFixer)
     {
         _logger = logger;
         _configuration = configuration;
@@ -45,6 +47,7 @@ public sealed class FileOperationsUtil : IFileOperationsUtil
         _fileUtil = fileUtil;
         _directoryUtil = directoryUtil;
         _kiotaUtil = kiotaUtil;
+        _openApiFixer = openApiFixer;
     }
 
     public async ValueTask Process(CancellationToken cancellationToken = default)
@@ -53,12 +56,16 @@ public sealed class FileOperationsUtil : IFileOperationsUtil
 
         string targetFilePath = Path.Combine(gitDirectory, "openapi.yaml");
 
+        string fixedFilePath = Path.Combine(gitDirectory, "fixed.json");
+
         await _fileUtil.DeleteIfExists(targetFilePath, cancellationToken: cancellationToken);
 
         string openApiDocumentUrl = _configuration["ngrok:ClientGenerationUrl"] ?? "https://raw.githubusercontent.com/ngrok/ngrok-openapi/refs/heads/main/ngrok.yaml";
 
         string? filePath = await _fileDownloadUtil.Download(openApiDocumentUrl,
             targetFilePath, fileExtension: ".yaml", cancellationToken: cancellationToken);
+        await _openApiFixer.Fix(targetFilePath, fixedFilePath, cancellationToken);
+
 
         await _kiotaUtil.EnsureInstalled(cancellationToken);
 
@@ -66,7 +73,7 @@ public sealed class FileOperationsUtil : IFileOperationsUtil
 
         await DeleteAllExceptCsproj(srcDirectory, cancellationToken);
 
-        await _kiotaUtil.Generate(filePath, "ngrokOpenApiClient", Constants.Library, srcDirectory, cancellationToken);
+        await _kiotaUtil.Generate(fixedFilePath, "ngrokOpenApiClient", Constants.Library, srcDirectory, cancellationToken);
 
         await BuildAndPush(gitDirectory, cancellationToken).NoSync();
     }
