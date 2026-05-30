@@ -15,6 +15,7 @@ using Soenneker.Extensions.ValueTask;
 using Soenneker.Utils.Directory.Abstract;
 using Soenneker.Utils.File.Abstract;
 using Soenneker.Utils.File.Download.Abstract;
+using Soenneker.Utils.Yaml.Abstract;
 using System.Collections.Generic;
 using Soenneker.Kiota.Util.Abstract;
 using Soenneker.OpenApi.Fixer.Abstract;
@@ -32,11 +33,12 @@ public sealed class FileOperationsUtil : IFileOperationsUtil
     private readonly IFileDownloadUtil _fileDownloadUtil;
     private readonly IFileUtil _fileUtil;
     private readonly IDirectoryUtil _directoryUtil;
+    private readonly IYamlUtil _yamlUtil;
     private readonly IKiotaUtil _kiotaUtil;
     private readonly IOpenApiFixer _openApiFixer;
 
     public FileOperationsUtil(ILogger<FileOperationsUtil> logger, IConfiguration configuration, IGitUtil gitUtil, IDotnetUtil dotnetUtil, IProcessUtil processUtil, 
-        IFileDownloadUtil fileDownloadUtil, IFileUtil fileUtil, IDirectoryUtil directoryUtil, IKiotaUtil kiotaUtil, IOpenApiFixer openApiFixer)
+        IFileDownloadUtil fileDownloadUtil, IFileUtil fileUtil, IDirectoryUtil directoryUtil, IKiotaUtil kiotaUtil, IYamlUtil yamlUtil, IOpenApiFixer openApiFixer)
     {
         _logger = logger;
         _configuration = configuration;
@@ -46,6 +48,7 @@ public sealed class FileOperationsUtil : IFileOperationsUtil
         _fileDownloadUtil = fileDownloadUtil;
         _fileUtil = fileUtil;
         _directoryUtil = directoryUtil;
+        _yamlUtil = yamlUtil;
         _kiotaUtil = kiotaUtil;
         _openApiFixer = openApiFixer;
     }
@@ -55,16 +58,19 @@ public sealed class FileOperationsUtil : IFileOperationsUtil
         string gitDirectory = await _gitUtil.CloneToTempDirectory($"https://github.com/soenneker/{Constants.Library.ToLowerInvariantFast()}", cancellationToken: cancellationToken);
 
         string targetFilePath = Path.Combine(gitDirectory, "openapi.yaml");
+        string jsonFilePath = Path.Combine(gitDirectory, "openapi.json");
 
         string fixedFilePath = Path.Combine(gitDirectory, "fixed.json");
 
         await _fileUtil.DeleteIfExists(targetFilePath, cancellationToken: cancellationToken);
+        await _fileUtil.DeleteIfExists(jsonFilePath, cancellationToken: cancellationToken);
 
         string openApiDocumentUrl = _configuration["ngrok:ClientGenerationUrl"] ?? "https://raw.githubusercontent.com/ngrok/ngrok-openapi/refs/heads/main/ngrok.yaml";
 
         string? filePath = await _fileDownloadUtil.Download(openApiDocumentUrl,
             targetFilePath, fileExtension: ".yaml", cancellationToken: cancellationToken);
-        await _openApiFixer.Fix(targetFilePath, fixedFilePath, cancellationToken);
+        await _yamlUtil.SaveAsJson(filePath ?? targetFilePath, jsonFilePath, true, cancellationToken);
+        await _openApiFixer.Fix(jsonFilePath, fixedFilePath, cancellationToken);
 
 
         await _kiotaUtil.EnsureInstalled(cancellationToken);
